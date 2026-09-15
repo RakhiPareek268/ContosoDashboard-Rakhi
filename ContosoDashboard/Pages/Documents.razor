@@ -1,0 +1,207 @@
+@page "/documents"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDocumentService DocumentService
+@inject IProjectService ProjectService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+
+<PageTitle>Documents - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1>Documents</h1>
+            <p class="text-muted mb-0">Upload, find, and manage authorized work files.</p>
+        </div>
+        <button class="btn btn-primary" @onclick="ToggleUpload"> <i class="bi bi-upload"></i> Upload documents</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="alert @(success ? "alert-success" : "alert-danger")" role="alert">@message</div>
+    }
+
+    @if (showUpload)
+    {
+        <div class="card mb-4">
+            <div class="card-header"><h5 class="mb-0">Upload documents</h5></div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label" for="document-files">Files</label>
+                        <InputFile id="document-files" OnChange="SelectFiles" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png" />
+                        <small class="text-muted">PDF, Office, text, JPEG, or PNG. Maximum 25 MB per file.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="document-title">Title</label>
+                        <InputText id="document-title" class="form-control" @bind-Value="title" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="document-category">Category</label>
+                        <InputSelect id="document-category" class="form-select" @bind-Value="category">
+                            <option value="">Select a category</option>
+                            @foreach (var item in DocumentServiceCategories)
+                            {
+                                <option value="@item">@item</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label" for="document-project">Project</label>
+                        <InputSelect id="document-project" class="form-select" @bind-Value="projectId">
+                            <option value="">Personal file</option>
+                            @foreach (var project in projects ?? [])
+                            {
+                                <option value="@project.ProjectId">@project.Name</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="document-description">Description</label>
+                        <InputTextArea id="document-description" class="form-control" @bind-Value="description" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label" for="document-tags">Tags</label>
+                        <InputText id="document-tags" class="form-control" @bind-Value="tags" placeholder="Example: planning, Q4, finance" />
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button class="btn btn-primary" @onclick="UploadFiles" disabled="@(uploading || selectedFiles.Count == 0)">
+                        @if (uploading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        @(uploading ? "Uploading..." : "Upload")
+                    </button>
+                    <button class="btn btn-link" @onclick="ToggleUpload" disabled="@uploading">Cancel</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">My Documents</h5>
+            <div class="d-flex gap-2">
+                <input class="form-control form-control-sm" placeholder="Search documents" @bind="search" @bind:event="oninput" @onkeydown="SearchOnEnter" />
+                <select class="form-select form-select-sm" @bind="filterCategory">
+                    <option value="">All categories</option>
+                    @foreach (var item in DocumentServiceCategories) { <option value="@item">@item</option> }
+                </select>
+                <select class="form-select form-select-sm" @bind="sort">
+                    <option value="date">Recent</option><option value="title">Title</option><option value="category">Category</option><option value="size">Size</option>
+                </select>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="LoadDocuments"><i class="bi bi-search"></i></button>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            @if (documents == null)
+            {
+                <p class="p-3"><em>Loading...</em></p>
+            }
+            else if (documents.Count == 0)
+            {
+                <p class="p-3 text-muted">No documents found.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead><tr><th>Title</th><th>Category</th><th>Project</th><th>Uploaded</th><th>Size</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            @foreach (var document in documents)
+                            {
+                                <tr>
+                                    <td><a href="/documents/@document.DocumentId"><strong>@document.Title</strong></a><br /><small class="text-muted">@document.FileType</small></td>
+                                    <td>@document.Category</td>
+                                    <td>@(document.ProjectName ?? "Personal")</td>
+                                    <td>@document.UploadedDate.ToLocalTime().ToString("MMM dd, yyyy")</td>
+                                    <td>@FormatSize(document.FileSize)</td>
+                                    <td>
+                                        <a class="btn btn-sm btn-outline-primary" href="/document-files/@document.DocumentId/preview" target="_blank" title="Preview or open"><i class="bi bi-eye"></i></a>
+                                        <a class="btn btn-sm btn-outline-secondary" href="/document-files/@document.DocumentId/download" title="Download"><i class="bi bi-download"></i></a>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (activityReport != null)
+    {
+        <div class="card mt-4">
+            <div class="card-header"><h5 class="mb-0">Administrator Report</h5></div>
+            <div class="card-body">
+                <p><strong>@activityReport.TotalDocuments</strong> active documents · <strong>@FormatSize(activityReport.TotalBytes)</strong> stored</p>
+                <div class="row">
+                    <div class="col-md-6"><h6>File types</h6>@foreach (var item in activityReport.ByFileType) { <div class="d-flex justify-content-between"><span>@item.Key</span><span>@item.Value</span></div> }</div>
+                    <div class="col-md-6"><h6>Uploaders</h6>@foreach (var item in activityReport.ByUploader) { <div class="d-flex justify-content-between"><span>@item.Key</span><span>@item.Value</span></div> }</div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly string[] DocumentServiceCategories = ContosoDashboard.Services.DocumentService.Categories;
+    private IReadOnlyList<DocumentSummary>? documents;
+    private List<Project>? projects;
+    private readonly List<IBrowserFile> selectedFiles = [];
+    private int currentUserId;
+    private string title = string.Empty;
+    private string category = string.Empty;
+    private string? description;
+    private string? tags;
+    private string search = string.Empty;
+    private string? filterCategory;
+    private string sort = "date";
+    private string? projectId;
+    private string? message;
+    private bool success;
+    private bool showUpload;
+    private bool uploading;
+    private DocumentActivityReport? activityReport;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var claim = authState.User.FindFirst(ClaimTypes.NameIdentifier);
+        if (claim != null) int.TryParse(claim.Value, out currentUserId);
+        if (currentUserId > 0)
+        {
+            projects = await ProjectService.GetUserProjectsAsync(currentUserId);
+            await LoadDocuments();
+            activityReport = await DocumentService.GetActivityReportAsync(currentUserId);
+        }
+    }
+
+    private async Task LoadDocuments() => documents = await DocumentService.SearchAsync(currentUserId, search, string.IsNullOrWhiteSpace(filterCategory) ? null : new DocumentFilters(filterCategory), sort);
+    private void ToggleUpload() => showUpload = !showUpload;
+    private void SelectFiles(InputFileChangeEventArgs args) { selectedFiles.Clear(); selectedFiles.AddRange(args.GetMultipleFiles(20)); }
+
+    private async Task UploadFiles()
+    {
+        if (currentUserId == 0 || selectedFiles.Count == 0) return;
+        uploading = true; message = null;
+        var selectedProject = int.TryParse(projectId, out var parsedProject) ? parsedProject : (int?)null;
+        var results = new List<string>();
+        foreach (var file in selectedFiles)
+        {
+            await using var stream = file.OpenReadStream(25 * 1024 * 1024);
+            var request = new UploadRequest(title, description, category, tags, selectedProject, null, file.Name, file.ContentType, file.Size);
+            var result = await DocumentService.UploadAsync(currentUserId, request, stream);
+            results.Add(result.Success ? $"{file.Name}: uploaded" : $"{file.Name}: {result.Message}");
+        }
+        success = results.All(item => item.EndsWith("uploaded", StringComparison.Ordinal));
+        message = string.Join(" | ", results);
+        uploading = false;
+        if (success) { showUpload = false; selectedFiles.Clear(); title = string.Empty; category = string.Empty; description = null; tags = null; projectId = null; }
+        await LoadDocuments();
+    }
+
+    private async Task SearchOnEnter(KeyboardEventArgs args) { if (args.Key == "Enter") await LoadDocuments(); }
+    private static string FormatSize(long size) => size < 1024 ? $"{size} B" : size < 1024 * 1024 ? $"{size / 1024d:0.0} KB" : $"{size / 1024d / 1024d:0.0} MB";
+}
+

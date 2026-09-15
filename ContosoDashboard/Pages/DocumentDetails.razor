@@ -1,0 +1,102 @@
+@page "/documents/{DocumentId:int}"
+@attribute [Authorize]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Forms
+@inject IDocumentService DocumentService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+
+<PageTitle>Document Details - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    @if (details == null)
+    {
+        <p><em>Loading...</em></p>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div><a href="/documents">Documents</a><h1 class="mb-0">@details.Document.Title</h1></div>
+            <div>
+                <a class="btn btn-outline-secondary" href="/document-files/@DocumentId/download"><i class="bi bi-download"></i> Download</a>
+                @if (details.CanManage) { <button class="btn btn-danger" @onclick="Delete">Delete</button> }
+            </div>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(message)) { <div class="alert @(success ? "alert-success" : "alert-danger")">@message</div> }
+        <div class="row g-4">
+            <div class="col-lg-8">
+                <div class="card"><div class="card-body">
+                            <h5>Metadata</h5>
+                    <div class="mb-3"><label class="form-label">Title</label><InputText class="form-control" @bind-Value="title" disabled="@(!details.CanManage)" /></div>
+                    <div class="mb-3"><label class="form-label">Category</label><InputSelect class="form-select" @bind-Value="category" disabled="@(!details.CanManage)"><option value="">Select a category</option>@foreach (var item in DocumentCategories) { <option value="@item">@item</option> }</InputSelect></div>
+                    <div class="mb-3"><label class="form-label">Description</label><InputTextArea class="form-control" @bind-Value="description" disabled="@(!details.CanManage)" /></div>
+                    <div class="mb-3"><label class="form-label">Tags</label><InputText class="form-control" @bind-Value="tags" disabled="@(!details.CanManage)" /></div>
+                    @if (details.CanManage) { <button class="btn btn-primary" @onclick="SaveMetadata">Save metadata</button> }
+                </div></div>
+                @if (details.CanManage)
+                {
+                    <div class="card mt-4"><div class="card-body">
+                        <h5>Replace file</h5><InputFile OnChange="SelectReplacement" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.jpg,.jpeg,.png" />
+                        <button class="btn btn-outline-primary mt-3" @onclick="Replace" disabled="@(replacement == null)">Replace file</button>
+                    </div></div>
+                }
+            </div>
+            <div class="col-lg-4">
+                <div class="card"><div class="card-body">
+                    <h5>Share with a user</h5>
+                    <label class="form-label">Recipient user ID</label><InputNumber class="form-control" @bind-Value="recipientId" />
+                    <button class="btn btn-outline-primary mt-3" @onclick="Share" disabled="@(!details.CanShare)">Share document</button>
+                    <hr /><dl><dt>File</dt><dd>@details.Document.OriginalFileName</dd><dt>Size</dt><dd>@details.Document.FileSize bytes</dd><dt>Uploaded</dt><dd>@details.Document.UploadedDate.ToLocalTime()</dd></dl>
+                </div></div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int DocumentId { get; set; }
+    private DocumentViewDetails? details;
+    private IBrowserFile? replacement;
+    private int currentUserId;
+    private int recipientId;
+    private string title = string.Empty;
+    private string category = string.Empty;
+    private string? description;
+    private string? tags;
+    private string? message;
+    private bool success;
+    private static readonly string[] DocumentCategories = ContosoDashboard.Services.DocumentService.Categories;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        int.TryParse(state.User.FindFirstValue(ClaimTypes.NameIdentifier), out currentUserId);
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        details = await DocumentService.GetAsync(DocumentId, currentUserId);
+        if (details == null) { NavigationManager.NavigateTo("/documents"); return; }
+        title = details.Document.Title; category = details.Document.Category; description = details.Document.Description; tags = details.Document.Tags;
+    }
+
+    private void SelectReplacement(InputFileChangeEventArgs args) => replacement = args.File;
+    private async Task SaveMetadata() { var result = await DocumentService.UpdateMetadataAsync(DocumentId, currentUserId, new MetadataUpdateRequest(title, description, category, tags)); SetResult(result); await Load(); }
+    private async Task Replace()
+    {
+        if (replacement == null || details == null) return;
+        await using var stream = replacement.OpenReadStream(25 * 1024 * 1024);
+        var result = await DocumentService.ReplaceAsync(DocumentId, currentUserId, new UploadRequest(title, description, category, tags, details.Document.ProjectId, details.Document.TaskId, replacement.Name, replacement.ContentType, replacement.Size), stream);
+        SetResult(result); if (result.Success) replacement = null; await Load();
+    }
+    private async Task Delete()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Delete this document permanently?")) return;
+        var result = await DocumentService.DeleteAsync(DocumentId, currentUserId);
+        if (result.Success) NavigationManager.NavigateTo("/documents"); else SetResult(result);
+    }
+    private async Task Share() { var result = await DocumentService.ShareAsync(DocumentId, currentUserId, recipientId); SetResult(result); }
+    private void SetResult(DocumentOperationResult result) { success = result.Success; message = result.Message; }
+}

@@ -164,3 +164,15 @@ main {
 .content {
     padding-top: 1.1rem;
 }
+
+.document-upload-card {
+    border-top: 3px solid #0078d4;
+}
+
+.document-upload-card .form-label {
+    font-weight: 600;
+}
+
+.document-file-status {
+    min-height: 1.5rem;
+}
